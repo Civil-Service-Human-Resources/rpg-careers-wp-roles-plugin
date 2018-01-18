@@ -31,10 +31,11 @@ class rpgroles{
 			'users_teams'		=> '',
 		);
 
-		//REGISTER ACTIONS
+		//REGISTER ACTIONS/FILTERS
 		add_action('init', array($this, 'add_roles'));
 		add_action('init', array($this, 'register_user_taxonomy'));
 		add_action('init', array($this, 'remove_hooks'), 999);
+		add_filter('login_redirect', array($this, 'login_redirect'), 10, 3);
 		
 		//TEAMS ACCESS CONTROL
 		add_filter('manage_page_posts_columns', array($this, 'manage_columns'));
@@ -65,6 +66,20 @@ class rpgroles{
 		//NB: HOOKS INTO FUNCTION FROM THE 'WP User Groups' PLUGIN
 		$this->settings['users_teams'] = (wp_get_terms_for_user(get_current_user_id(), 'content_team')) ? wp_get_terms_for_user(get_current_user_id(), 'content_team') : array();
 
+		//NB: KEEP AT BOTTOM OF FUNCTION AS A FEW return STATEMENTS TO BE CAREFUL OF
+		global $pagenow;
+		if ($pagenow!=='profile.php' && $pagenow!=='user-edit.php') {
+			return;
+		}
+ 
+	    //IF CURRENT USER CAN CREATE USERS THEN DO NOT AMEND THE SCREEN
+		if (current_user_can('create_users')) {
+			return;
+		}
+ 
+		//CALL OFF TO AMEND THE PROFILE SCREEN
+		add_action('admin_footer', array($this,'amend_profile_fields_disable_js'));
+
 	}
 
 	function load_edit(){
@@ -72,6 +87,34 @@ class rpgroles{
 		add_filter('posts_join', array($this, 'posts_join'), 10, 2);
 		add_filter('posts_where', array($this, 'posts_where'),10, 2);
 		add_filter('views_edit-page', array($this, 'fix_post_counts')); 
+	}
+
+	function login_redirect( $redirect_to, $request, $user ){
+		if(isset($_REQUEST['redirect_to'])){
+			return $_REQUEST['redirect_to'];
+		}
+		return admin_url();
+	}
+
+	function amend_profile_fields_disable_js(){
+	?>
+<script type="text/javascript">jQuery(document).ready(function($){var a=jQuery("h3:contains('Relationships')").next('.form-table').find('tr').has('td'); b=a.find('input[type="checkbox"]'),c=a.find('a');if(b){b.each(function(){$(this).attr('disabled','disabled');});}if(c){c.each(function(){$(this).attr('style','display:none');});}});</script>
+	<?php
+	}
+
+
+	function bespoke_js_script(){
+		global $pagenow;
+
+		if($pagenow==='post-new.php' || $pagenow==='post.php'){
+			//NOT PRETTY BUT GETS JOB DONE...
+			if (!wp_script_is('jquery','done')) {
+				wp_enqueue_script('jquery');
+			}
+	   ?>
+<script type="text/javascript">(function(){jQuery(function(){var e=setInterval(function(){if(jQuery('#workflow_submit').length){jQuery('#workflow_submit').attr('style','margin-left:5px;');clearInterval(e);}},100);var f=setInterval(function(){if(jQuery('#step_submit').length){jQuery('#step_submit').attr('style','margin-left:5px;');jQuery('#step_submit').prev('a').attr('style','');clearInterval(f);}},100);});})();</script>
+    <?php
+		}
 	}
 
 	function save_post($post_id, $post, $update){
@@ -251,14 +294,23 @@ class rpgroles{
 			//EARLY HOOK INTO THE POST EDIT SCREENS - USE TO CHECK THAT CURRENT USER CAN VIEW THE PAGE
 			if($this->restrict_access()){
 				$canaccess = false;
-				$teams = $this->get_setting('users_teams');
-				$post_teams = get_post_meta($post->ID, 'rpg-team');
+				
+				global $pagenow;
 
-				if(count($teams)>0){
-					foreach ($teams as $team) {
-						if(in_array($team->term_id, $post_teams)){
-							$canaccess = true;
-							break;
+				if($pagenow==='post-new.php'){
+					//NEW PAGE SO LET REQUEST THROUGH
+					$canaccess = true;
+				}else{
+					//EDITING A PAGE SO CHECK CAN ACCESS
+					$teams = $this->get_setting('users_teams');
+					$post_teams = get_post_meta($post->ID, 'rpg-team');
+
+					if(count($teams)>0){
+						foreach ($teams as $team) {
+							if(in_array($team->term_id, $post_teams)){
+								$canaccess = true;
+								break;
+							}
 						}
 					}
 				}
@@ -277,6 +329,7 @@ class rpgroles{
 					'side',
 					'high'
 				);
+
 		}
 	}
 
@@ -334,6 +387,7 @@ class rpgroles{
 		}
 
 		echo $output;
+					$this->bespoke_js_script();
 	}
 
 	function custom_column($column_name, $post_id) {
@@ -387,7 +441,8 @@ class rpgroles{
 		//DEFINE CAPABILITIES
 		$contentAuthorCaps = array(
 			'read'						=> true,
-			'edit_pages'				=> true
+			'edit_pages'				=> true,
+			'ow_submit_to_workflow'		=> true,
 		);
 
 		$contentApproverCaps = array(
@@ -403,6 +458,13 @@ class rpgroles{
 			'edit_private_pages'		=> true,
 			'edit_published_pages'		=> true,
 			'upload_files'				=> true,
+			'ow_reassign_task'			=> true,
+			'ow_sign_off_step'			=> true,
+			'ow_skip_workflow'			=> true,
+			'ow_submit_to_workflow'		=> true,
+			'ow_view_others_inbox'		=> true,
+			'ow_view_reports'			=> true,
+			'ow_view_workflow_history'	=> true,
 		);
 
 		$contentPublisherCaps = array(
@@ -418,6 +480,13 @@ class rpgroles{
 			'edit_private_pages'		=> true,
 			'edit_published_pages'		=> true,
 			'upload_files'				=> true,
+			'ow_reassign_task'			=> true,
+			'ow_sign_off_step'			=> true,
+			'ow_skip_workflow'			=> true,
+			'ow_submit_to_workflow'		=> true,
+			'ow_view_others_inbox'		=> true,
+			'ow_view_reports'			=> true,
+			'ow_view_workflow_history'	=> true,
 		);
 
 		$contentAdminCaps = array(
@@ -445,8 +514,13 @@ class rpgroles{
 			'list_users'				=> true,
 			'promote_users'				=> true,
 			'remove_users'				=> true,
-			'edit_team_content'			=> true,
-			'edit_global_content'		=> true
+			'ow_reassign_task'			=> true,
+			'ow_sign_off_step'			=> true,
+			'ow_skip_workflow'			=> true,
+			'ow_submit_to_workflow'		=> true,
+			'ow_view_others_inbox'		=> true,
+			'ow_view_reports'			=> true,
+			'ow_view_workflow_history'	=> true,
 		);
 
 		$contentSnippets = array(
@@ -460,7 +534,6 @@ class rpgroles{
 		add_role('content_publisher', __('Content Publisher'), $contentPublisherCaps);
 		add_role('content_admin', __('Content Admin'), $contentAdminCaps);
 		add_role('content_snippets', __('Content Snippets'), $contentSnippets);
-
 	}
 
     function register_user_taxonomy() {
@@ -473,6 +546,7 @@ class rpgroles{
         new WP_User_Taxonomy('content_team', 'users/content-team', array(
             'singular' => __('Team',  'rpgroles'),
             'plural'   => __('Teams', 'rpgroles'),
+			'exclusive' => false,
        ));
     }
 
